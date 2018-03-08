@@ -175,6 +175,78 @@ class BasicAttn(object):
 
             return attn_dist, output
 
+class BiDirAttnFlow(object):
+    """Module for bidirectional attention flow.
+    [link]
+    TODO: add some comments here.
+    """
+    def __init__(self, keep_prob, hidden_size):
+        """
+        Inputs:
+          keep_prob: tensor containing a single scalar that is the keep probability (for dropout)
+          hidden_size: size of the hidden vectors (equal for context and question)
+        """
+        self.keep_prob = keep_prob
+        self.w_sim1 = tf.get_variable("w_sim1", shape=(hidden_size, 1), \
+            initializer=tf.contrib.layers.xavier_initializer())
+        self.w_sim2 = tf.get_variable("w_sim2", shape=(hidden_size, 1), \
+            initializer=tf.contrib.layers.xavier_initializer())
+        self.w_sim3 = tf.get_variable("w_sim3", shape=(hidden_size, 1), \
+            initializer=tf.contrib.layers.xavier_initializer())
+
+    def build_graph(self, question_hiddens, qn_mask, context_hiddens, context_mask):
+        with vs.variable_scope("BiDirAttnFlow"):
+            _, context_len, hidden_sz = context_hiddens.shape
+            question_len = question_hiddens.shape[1]
+            print "Context_len: %d, Question_len: %d, Hidden sz: %d" % (context_len, question_len, hidden_sz)
+
+            # 1. Calculate similary matrix (shape: (num_questions, num_contexts))
+            flat_contexts = tf.reshape(context_hiddens, (-1, hidden_sz))
+            flat_questions = tf.reshape(question_hiddens, (-1, hidden_sz))
+            context_contribs = tf.reshape(tf.matmul(flat_contexts, self.w_sim1), (-1, context_len,)) # (batch_sz, context_len, 1)
+            question_contribs = tf.reshape(tf.matmul(flat_questions, self.w_sim2), (-1, question_len,)) # (batch_sz, question_len,)
+
+            context_hiddens_ = tf.expand_dims(context_hiddens, 1) # (batch_sz, 1, context_len, 2h)
+            question_hiddens_ = tf.expand_dims(question_hiddens, 2) # (batch_sz, question_len, 1, 2h)
+            context_question_hiddens = tf.reshape(tf.multiply(context_hiddens_, question_hiddens_), (-1, hidden_sz)) # (batch_sz, question_len, context_len, 2h)
+            context_question_contribs = tf.reshape(tf.matmul(context_question_hiddens, self.w_sim3), (-1, question_len, context_len,)) # (batch_sz, question_len, context_len, )
+
+            context_contribs_ = tf.expand_dims(context_contribs, 1) # (batch_sz, 1, context_len,)
+            question_contribs_ = tf.expand_dims(question_contribs, 2) # (batch_sz, question_len, 1,)
+
+            # This is the final matrix S where S_ij = w_sim^T [c_i; q_j; c_i * q_j]
+            similarities = tf.add( \
+                tf.add(context_contribs_, question_contribs_), \
+                context_question_contribs \
+            ) # (batch_sz, question_len, context_len)
+
+            # 2. C2Q attention.
+            # Row-wise softmax of sim matrix
+            similarities_t = tf.transpose(similarities, perm=[0, 2, 1]) # shape (batch_size, context_len, question_len)
+            c2q_mask = tf.expand_dims(qn_mask, 1) # (batch_sz, 1, question_len)
+            _, c2q_attn_dist = masked_softmax(similarities_t, c2q_mask, 1) # shape (batch_size, context_len, question_len). take softmax over values
+            # Weighted sum of question hidden states
+            c2q_output = tf.matmul(c2q_attn_dist, question_hiddens)
+
+            # 3. Q2C attention.
+            # Max of each row of sim matrix
+            row_max_sims = tf.reduce_max(similarities_t, 2)
+            _, q2c_attn_dist = masked_softmax(row_max_sims, context_mask, 0)
+            # Weighted sum of context hidden states
+            q2c_attn_dist_ = tf.expand_dims(q2c_attn_dist, 1)
+            c_prime = tf.matmul(q2c_attn_dist_, context_hiddens)
+
+            # 4. Combination vector is output
+            block3 = tf.multiply(context_hiddens, c2q_output)
+            block4 = tf.multiply(context_hiddens, c_prime)
+            tmp1 = tf.concat([context_hiddens, c2q_output], 2)
+            tmp2 = tf.concat([block3, block4], 2)
+            output = tf.concat([tmp1, tmp2], 2)
+
+            # 5. Apply dropout
+            output = tf.nn.dropout(output, self.keep_prob)
+
+            return output
 
 def masked_softmax(logits, mask, dim):
     """
