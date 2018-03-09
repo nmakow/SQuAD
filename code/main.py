@@ -42,7 +42,11 @@ tf.app.flags.DEFINE_integer("gpu", 0, "Which GPU to use, if you have multiple.")
 tf.app.flags.DEFINE_string("mode", "train", "Available modes: train / show_examples / official_eval")
 tf.app.flags.DEFINE_string("experiment_name", "", "Unique name for your experiment. This will create a directory by this name in the experiments/ directory, which will hold all data related to this experiment")
 tf.app.flags.DEFINE_integer("num_epochs", 0, "Number of epochs to train. 0 means train indefinitely")
+
+# Custom features (model extensions)
 tf.app.flags.DEFINE_boolean("bidaf", False, "If True, use bidirectional attention flow layer as attn layer")
+tf.app.flags.DEFINE_boolean("self_attend", False, "If True, use self-attention layer")
+tf.app.flags.DEFINE_integer("self_attend_hidden_sz", 75, "Hidden size in self-attention layer")
 
 # Hyperparameters
 tf.app.flags.DEFINE_float("learning_rate", 0.001, "Learning rate.")

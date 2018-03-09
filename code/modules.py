@@ -257,6 +257,54 @@ class BiDirAttnFlow(object):
 
             return output
 
+class SelfAttn(object):
+    """Module for bidirectional attention flow.
+    [link]
+    TODO: add some comments here.
+    """
+    def __init__(self, keep_prob, repr_sz, hidden_sz):
+        """
+        Inputs:
+          keep_prob: tensor containing a single scalar that is the keep probability (for dropout)
+          repr_size: size of the representation vectors (i.e. size of attention vectors)
+          hidden_size: size of the hidden vectors (equal for context and question)
+        """
+        self.keep_prob = keep_prob
+        self.hidden_sz = hidden_sz
+        self.encoder = RNNEncoder(hidden_sz, keep_prob)
+        self.w_self1 = tf.get_variable("w_self1", shape=(repr_sz, hidden_sz), \
+            initializer=tf.contrib.layers.xavier_initializer())
+        self.w_self2 = tf.get_variable("w_self2", shape=(repr_sz, hidden_sz), \
+            initializer=tf.contrib.layers.xavier_initializer())
+        self.v_self = tf.get_variable("v_self", shape=(hidden_sz, 1), \
+            initializer=tf.contrib.layers.xavier_initializer())
+
+    def build_graph(self, reprs):
+        with vs.variable_scope("SelfAttn"):
+            _, num_reprs, repr_sz = reprs.shape
+
+            flat_reprs = tf.reshape(reprs, (-1, repr_sz))
+            tmp1 = tf.reshape(tf.matmul(flat_reprs, self.w_self1), (-1, num_reprs, self.hidden_sz)) # (batch_sz, num_reprs, hidden_sz)
+            tmp2 = tf.reshape(tf.matmul(flat_reprs, self.w_self2), (-1, num_reprs, self.hidden_sz)) # (batch_sz, num_reprs, hidden_sz)
+            tmp1_ = tf.expand_dims(tmp1, 1) # (batch_sz, 1, num_reprs, hidden_sz)
+            tmp2_ = tf.expand_dims(tmp2, 2) # (batch_sz, num_reprs, 1, hidden_sz)
+            tmp3 = tf.tanh(tf.add(tmp1_, tmp2_)) # (batch_sz, num_reprs, num_reprs, hidden_sz) --- "i" corresponds to rows
+            flat_tmp3 = tf.reshape(tmp3, (-1, self.hidden_sz))
+            e = tf.reshape(tf.matmul(flat_tmp3, self.v_self), (-1, num_reprs, num_reprs, )) # (batch_sz, num_reprs, num_reprs, )
+
+            mask = tf.ones_like(e)
+            _, attn_dist = masked_softmax(e, mask, 1)
+
+            self_outputs = tf.matmul(attn_dist, reprs)
+
+            # concatenate self_outputs with reprs
+            concat_outputs = tf.concat([reprs, self_outputs], 2) # (batch_sz, num_reprs, 2*repr_size)
+            rnn_mask = tf.ones_like(concat_outputs, dtype=tf.int32)
+            rnn_mask = tf.reduce_prod(rnn_mask, axis=2) # (batch_size, num_reprs, )
+            output = self.encoder.build_graph(concat_outputs, rnn_mask)
+
+            return output
+
 def masked_softmax(logits, mask, dim):
     """
     Takes masked softmax over given dimension of logits.

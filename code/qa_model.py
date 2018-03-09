@@ -30,7 +30,8 @@ from tensorflow.python.ops import embedding_ops
 from evaluate import exact_match_score, f1_score
 from data_batcher import get_batch_generator
 from pretty_print import print_example
-from modules import RNNEncoder, SimpleSoftmaxLayer, BasicAttn, BiDirAttnFlow
+from modules import RNNEncoder, SimpleSoftmaxLayer, BasicAttn, BiDirAttnFlow, \
+                    SelfAttn
 
 logging.basicConfig(level=logging.INFO)
 
@@ -143,6 +144,11 @@ class QAModel(object):
             _, attn_output = attn_layer.build_graph(question_hiddens, self.qn_mask, context_hiddens) # attn_output is shape (batch_size, context_len, hidden_size*2)
             # Concat attn_output to context_hiddens to get blended_reps
             blended_reps = tf.concat([context_hiddens, attn_output], axis=2) # (batch_size, context_len, hidden_size*4)
+
+        # Self-attention layer
+        if self.FLAGS.self_attend:
+            self_attn_layer = SelfAttn(self.keep_prob, blended_reps.shape[-1], self.FLAGS.self_attend_hidden_sz)
+            blended_reps = self_attn_layer.build_graph(blended_reps) # (batch_size, context_len, 2*self_attend_hidden_sz)
 
         # Apply fully connected layer to each blended representation
         # Note, blended_reps_final corresponds to b' in the handout
