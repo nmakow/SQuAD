@@ -31,7 +31,7 @@ from evaluate import exact_match_score, f1_score
 from data_batcher import get_batch_generator
 from pretty_print import print_example
 from modules import RNNEncoder, SimpleSoftmaxLayer, BasicAttn, BiDirAttnFlow, \
-                    SelfAttn
+                    SelfAttn, StackedRNNEncoder
 
 logging.basicConfig(level=logging.INFO)
 
@@ -108,9 +108,13 @@ class QAModel(object):
             The GloVe vectors, plus vectors for PAD and UNK.
         """
         with vs.variable_scope("embeddings"):
+
             # Note: the embedding matrix is a tf.constant which means it's not a trainable parameter
-            embedding_matrix = tf.get_variable("emb_matrix", shape=(400002, self.FLAGS.embedding_size), \
-                initializer=tf.constant_initializer(self.pretrained_embeddings), dtype=tf.float32) # shape (400002, embedding_size)
+            if self.FLAGS.retrain_word_embeds:
+                embedding_matrix = tf.get_variable("emb_matrix", shape=(400002, self.FLAGS.embedding_size), \
+                    initializer=tf.constant_initializer(self.pretrained_embeddings), dtype=tf.float32) # shape (400002, embedding_size)
+            else:
+                embedding_matrix = tf.constant(emb_matrix, dtype=tf.float32, name="emb_matrix")
 
             # Get the word embeddings for the context and question,
             # using the placeholders self.context_ids and self.qn_ids
@@ -158,6 +162,11 @@ class QAModel(object):
 
         # TODO: Modeling layer from BiDAF. We can add another RNN (two stacked
         #       from BiDAF paper) to the hidden states from the attention layer.
+        if self.FLAGS.modeling_layer:
+            modeling_layer = StackedRNNEncoder(self.FLAGS.hidden_size, self.FLAGS.num_model_rnn_layers, self.keep_prob)
+            print blended_reps_final
+            blended_reps_final = modeling_layer.build_graph(blended_reps_final, self.context_mask)
+            print blended_reps_final
 
         # Use softmax layer to compute probability distribution for start location
         # Note this produces self.logits_start and self.probdist_start, both of which have shape (batch_size, context_len)
@@ -314,7 +323,9 @@ class QAModel(object):
         # instead of taking argmax over entire end_dist:
         #    end_pos' = argmax(end_dist[start_pos:start_pos+15])
         # then the real end_pos = end_pos' + start_pos
-        end_pos = start_pos + np.argmax(end_dist[start_pos:start_pos+15], axis=1)
+        # trunc_end_dist = np.array([np.array(end_dist[i,start:start+20]) for i,start in enumerate(start_pos)])
+        # end_pos = start_pos + np.argmax(trunc_end_dist, axis=1)
+        end_pos = np.argmax(end_dist, axis=1)
 
         return start_pos, end_pos
 
@@ -506,9 +517,10 @@ class QAModel(object):
                 if global_step % self.FLAGS.eval_every == 0:
 
                     # Get loss for entire dev set and log to tensorboard
-                    dev_loss = self.get_dev_loss(session, dev_context_path, dev_qn_path, dev_ans_path)
-                    logging.info("Epoch %d, Iter %d, dev loss: %f" % (epoch, global_step, dev_loss))
-                    write_summary(dev_loss, "dev/loss", summary_writer, global_step)
+                    if not self.FLAGS.small_dataset:
+                        dev_loss = self.get_dev_loss(session, dev_context_path, dev_qn_path, dev_ans_path)
+                        logging.info("Epoch %d, Iter %d, dev loss: %f" % (epoch, global_step, dev_loss))
+                        write_summary(dev_loss, "dev/loss", summary_writer, global_step)
 
 
                     # Get F1/EM on train set and log to tensorboard
@@ -519,17 +531,19 @@ class QAModel(object):
 
 
                     # Get F1/EM on dev set and log to tensorboard
-                    dev_f1, dev_em = self.check_f1_em(session, dev_context_path, dev_qn_path, dev_ans_path, "dev", num_samples=0)
-                    logging.info("Epoch %d, Iter %d, Dev F1 score: %f, Dev EM score: %f" % (epoch, global_step, dev_f1, dev_em))
-                    write_summary(dev_f1, "dev/F1", summary_writer, global_step)
-                    write_summary(dev_em, "dev/EM", summary_writer, global_step)
+                    if not self.FLAGS.small_dataset:
+                        dev_f1, dev_em = self.check_f1_em(session, dev_context_path, dev_qn_path, dev_ans_path, "dev", num_samples=0)
+                        logging.info("Epoch %d, Iter %d, Dev F1 score: %f, Dev EM score: %f" % (epoch, global_step, dev_f1, dev_em))
+                        write_summary(dev_f1, "dev/F1", summary_writer, global_step)
+                        write_summary(dev_em, "dev/EM", summary_writer, global_step)
 
 
                     # Early stopping based on dev EM. You could switch this to use F1 instead.
-                    if best_dev_em is None or dev_em > best_dev_em:
-                        best_dev_em = dev_em
-                        logging.info("Saving to %s..." % bestmodel_ckpt_path)
-                        self.bestmodel_saver.save(session, bestmodel_ckpt_path, global_step=global_step)
+                    if not self.FLAGS.small_dataset:
+                        if best_dev_em is None or dev_em > best_dev_em:
+                            best_dev_em = dev_em
+                            logging.info("Saving to %s..." % bestmodel_ckpt_path)
+                            self.bestmodel_saver.save(session, bestmodel_ckpt_path, global_step=global_step)
 
 
             epoch_toc = time.time()

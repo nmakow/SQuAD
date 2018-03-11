@@ -42,11 +42,15 @@ tf.app.flags.DEFINE_integer("gpu", 0, "Which GPU to use, if you have multiple.")
 tf.app.flags.DEFINE_string("mode", "train", "Available modes: train / show_examples / official_eval")
 tf.app.flags.DEFINE_string("experiment_name", "", "Unique name for your experiment. This will create a directory by this name in the experiments/ directory, which will hold all data related to this experiment")
 tf.app.flags.DEFINE_integer("num_epochs", 0, "Number of epochs to train. 0 means train indefinitely")
+tf.app.flags.DEFINE_boolean("small_dataset", False, "If True, use small dataset (for testing)")
 
 # Custom features (model extensions)
 tf.app.flags.DEFINE_boolean("bidaf", False, "If True, use bidirectional attention flow layer as attn layer")
 tf.app.flags.DEFINE_boolean("self_attend", False, "If True, use self-attention layer")
 tf.app.flags.DEFINE_integer("self_attend_hidden_sz", 75, "Hidden size in self-attention layer")
+tf.app.flags.DEFINE_boolean("retrain_word_embeds", False, "If True, retrain word embeddings")
+tf.app.flags.DEFINE_boolean("modeling_layer", False, "If True, use modeling layer as described in BiDAF paper")
+tf.app.flags.DEFINE_integer("num_model_rnn_layers", 2, "Number of hidden RNN layers to use in the modeling layer")
 
 # Hyperparameters
 tf.app.flags.DEFINE_float("learning_rate", 0.001, "Learning rate.")
@@ -130,9 +134,14 @@ def main(unused_argv):
     emb_matrix, word2id, id2word = get_glove(FLAGS.glove_path, FLAGS.embedding_size)
 
     # Get filepaths to train/dev datafiles for tokenized queries, contexts and answers
-    train_context_path = os.path.join(FLAGS.data_dir, "train.context")
-    train_qn_path = os.path.join(FLAGS.data_dir, "train.question")
-    train_ans_path = os.path.join(FLAGS.data_dir, "train.span")
+    if FLAGS.small_dataset: # use small dataset for testing/debugging
+        train_context_path = os.path.join(FLAGS.data_dir, "small_train.context")
+        train_qn_path = os.path.join(FLAGS.data_dir, "small_train.question")
+        train_ans_path = os.path.join(FLAGS.data_dir, "small_train.span")
+    else:
+        train_context_path = os.path.join(FLAGS.data_dir, "train.context")
+        train_qn_path = os.path.join(FLAGS.data_dir, "train.question")
+        train_ans_path = os.path.join(FLAGS.data_dir, "train.span")
     dev_context_path = os.path.join(FLAGS.data_dir, "dev.context")
     dev_qn_path = os.path.join(FLAGS.data_dir, "dev.question")
     dev_ans_path = os.path.join(FLAGS.data_dir, "dev.span")
