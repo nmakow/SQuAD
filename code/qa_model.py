@@ -53,6 +53,7 @@ class QAModel(object):
         self.FLAGS = FLAGS
         self.id2word = id2word
         self.word2id = word2id
+        self.pretrained_embeddings = emb_matrix
 
         # Add all parts of the graph
         with tf.variable_scope("QAModel", initializer=tf.contrib.layers.variance_scaling_initializer(factor=1.0, uniform=True)):
@@ -107,9 +108,9 @@ class QAModel(object):
             The GloVe vectors, plus vectors for PAD and UNK.
         """
         with vs.variable_scope("embeddings"):
-
             # Note: the embedding matrix is a tf.constant which means it's not a trainable parameter
-            embedding_matrix = tf.constant(emb_matrix, dtype=tf.float32, name="emb_matrix") # shape (400002, embedding_size)
+            embedding_matrix = tf.get_variable("emb_matrix", shape=(400002, self.FLAGS.embedding_size), \
+                initializer=tf.constant_initializer(self.pretrained_embeddings), dtype=tf.float32) # shape (400002, embedding_size)
 
             # Get the word embeddings for the context and question,
             # using the placeholders self.context_ids and self.qn_ids
@@ -154,6 +155,9 @@ class QAModel(object):
         # Note, blended_reps_final corresponds to b' in the handout
         # Note, tf.contrib.layers.fully_connected applies a ReLU non-linarity here by default
         blended_reps_final = tf.contrib.layers.fully_connected(blended_reps, num_outputs=self.FLAGS.hidden_size) # blended_reps_final is shape (batch_size, context_len, hidden_size)
+
+        # TODO: Modeling layer from BiDAF. We can add another RNN (two stacked
+        #       from BiDAF paper) to the hidden states from the attention layer.
 
         # Use softmax layer to compute probability distribution for start location
         # Note this produces self.logits_start and self.probdist_start, both of which have shape (batch_size, context_len)
@@ -307,7 +311,10 @@ class QAModel(object):
 
         # Take argmax to get start_pos and end_post, both shape (batch_size)
         start_pos = np.argmax(start_dist, axis=1)
-        end_pos = np.argmax(end_dist, axis=1)
+        # instead of taking argmax over entire end_dist:
+        #    end_pos' = argmax(end_dist[start_pos:start_pos+15])
+        # then the real end_pos = end_pos' + start_pos
+        end_pos = start_pos + np.argmax(end_dist[start_pos:start_pos+15], axis=1)
 
         return start_pos, end_pos
 
