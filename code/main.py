@@ -53,6 +53,12 @@ tf.app.flags.DEFINE_boolean("modeling_layer", False, "If True, use modeling laye
 tf.app.flags.DEFINE_integer("num_model_rnn_layers", 2, "Number of hidden RNN layers to use in the modeling layer")
 tf.app.flags.DEFINE_integer("num_encoding_layers", 2, "Number of hidden RNN layers in the context and question encoder")
 
+# Char embedding params
+tf.app.flags.DEFINE_boolean("char_embeddings", False, "If True, use character embeddings")
+tf.app.flags.DEFINE_integer("char_embedding_size", 20, "Size of character embeddings")
+tf.app.flags.DEFINE_integer("char_kernel_size", 5, "Kernel size in CNN character embedding")
+tf.app.flags.DEFINE_integer("char_num_filters", 100, "Number of filters in CNN character embedding")
+
 # Hyperparameters
 tf.app.flags.DEFINE_float("learning_rate", 0.001, "Learning rate.")
 tf.app.flags.DEFINE_float("max_gradient_norm", 5.0, "Clip gradients to this norm.")
@@ -61,6 +67,7 @@ tf.app.flags.DEFINE_integer("batch_size", 100, "Batch size to use")
 tf.app.flags.DEFINE_integer("hidden_size", 200, "Size of the hidden states")
 tf.app.flags.DEFINE_integer("context_len", 600, "The maximum context length of your model")
 tf.app.flags.DEFINE_integer("question_len", 30, "The maximum question length of your model")
+tf.app.flags.DEFINE_integer("word_len", 15, "The maxmimum word length of your model (for character embeddings)")
 tf.app.flags.DEFINE_integer("embedding_size", 100, "Size of the pretrained word vectors. This needs to be one of the available GloVe dimensions: 50/100/200/300")
 
 # How often to print, save, eval

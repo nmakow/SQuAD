@@ -90,8 +90,12 @@ class QAModel(object):
         # allows you to run the same model with variable batch_size
         self.context_ids = tf.placeholder(tf.int32, shape=[None, self.FLAGS.context_len])
         self.context_mask = tf.placeholder(tf.int32, shape=[None, self.FLAGS.context_len])
+        self.context_c_ids = tf.placeholder(tf.int32, shape=[None, self.FLAGS.context_len, self.FLAGS.word_len])
+        self.context_c_mask = tf.placeholder(tf.int32, shape=[None, self.FLAGS.context_len, self.FLAGS.word_len])
         self.qn_ids = tf.placeholder(tf.int32, shape=[None, self.FLAGS.question_len])
         self.qn_mask = tf.placeholder(tf.int32, shape=[None, self.FLAGS.question_len])
+        self.qn_c_ids = tf.placeholder(tf.int32, shape=[None, self.FLAGS.question_len, self.FLAGS.word_len])
+        self.qn_c_mask = tf.placeholder(tf.int32, shape=[None, self.FLAGS.question_len, self.FLAGS.word_len])
         self.ans_span = tf.placeholder(tf.int32, shape=[None, 2])
 
         # Add a placeholder to feed in the keep probability (for dropout).
@@ -107,8 +111,7 @@ class QAModel(object):
           emb_matrix: shape (400002, embedding_size).
             The GloVe vectors, plus vectors for PAD and UNK.
         """
-        with vs.variable_scope("embeddings"):
-
+        with vs.variable_scope("embeddings", reuse=tf.AUTO_REUSE):
             # Note: the embedding matrix is a tf.constant which means it's not a trainable parameter
             if self.FLAGS.retrain_word_embeds:
                 embedding_matrix = tf.get_variable("emb_matrix", shape=(400002, self.FLAGS.embedding_size), \
@@ -120,6 +123,30 @@ class QAModel(object):
             # using the placeholders self.context_ids and self.qn_ids
             self.context_embs = embedding_ops.embedding_lookup(embedding_matrix, self.context_ids) # shape (batch_size, context_len, embedding_size)
             self.qn_embs = embedding_ops.embedding_lookup(embedding_matrix, self.qn_ids) # shape (batch_size, question_len, embedding_size)
+
+            if self.FLAGS.char_embeddings:
+                # Note 51 = char vocab size (49 chars, plus PAD + UNK)
+                char_emb_matrix = tf.get_variable("char_emb_matrix", shape=(51, self.FLAGS.char_embedding_size), \
+                        initializer=tf.contrib.layers.xavier_initializer())
+
+                self.context_c_embs = embedding_ops.embedding_lookup(char_emb_matrix, self.context_c_ids) # shape (batch_size, context_len, word_len, char_embedding_size)
+                self.qn_c_embs = embedding_ops.embedding_lookup(char_emb_matrix, self.qn_c_ids) # shape (batch_size, question_len, word_len, char_embedding_size)
+
+                # First reshape c_embs to (batch_size * {context/question}_len, word_len, char_embedding_size
+                max_word_len = self.context_c_embs.shape[2] # == self.qn_c_embs.shape[2]
+                self.context_c_embs = tf.reshape(self.context_c_embs, (-1, max_word_len, self.FLAGS.char_embedding_size))
+                self.context_c_embs = tf.layers.conv1d(self.context_c_embs, self.FLAGS.char_num_filters, self.FLAGS.char_kernel_size, padding="same")
+                self.context_c_embs = tf.reshape(self.context_c_embs, (-1, self.FLAGS.context_len, max_word_len, self.FLAGS.char_num_filters)) # shape (batch_size, context_len, word_len, char_num_filters)
+                self.context_c_embs = tf.reduce_max(self.context_c_embs, 2) # shape (batch_size, context_len, char_num_filters)
+
+                # print self.context_c_embs
+                self.qn_c_embs = tf.reshape(self.qn_c_embs, (-1, max_word_len, self.FLAGS.char_embedding_size))
+                self.qn_c_embs = tf.layers.conv1d(self.qn_c_embs, self.FLAGS.char_num_filters, self.FLAGS.char_kernel_size, padding="same")
+                self.qn_c_embs = tf.reshape(self.qn_c_embs, (-1, self.FLAGS.question_len, max_word_len, self.FLAGS.char_num_filters)) # shape (batch_size, question_len, word_len, char_num_filters)
+                self.qn_c_embs = tf.reduce_max(self.qn_c_embs, axis=2) # shape (batch_size, question_len, char_num_filters)
+
+                self.context_embs = tf.concat([self.context_embs, self.context_c_embs], 2)
+                self.qn_embs = tf.concat([self.qn_embs, self.qn_c_embs], 2)
 
 
     def build_graph(self):
@@ -139,8 +166,6 @@ class QAModel(object):
         encoder = StackedRNNEncoder(self.FLAGS.hidden_size, self.FLAGS.num_encoding_layers, self.keep_prob)
         context_hiddens = encoder.build_graph(self.context_embs, self.context_mask) # (batch_size, context_len, hidden_size*2)
         question_hiddens = encoder.build_graph(self.qn_embs, self.qn_mask) # (batch_size, question_len, hidden_size*2)
-        print context_hiddens
-        print question_hiddens
 
         # Use context hidden states to attend to question hidden states
         if self.FLAGS.bidaf:
@@ -155,7 +180,7 @@ class QAModel(object):
         # Self-attention layer
         if self.FLAGS.self_attend:
             self_attn_layer = SelfAttn(self.keep_prob, blended_reps.shape[-1], self.FLAGS.self_attend_hidden_sz)
-            blended_reps = self_attn_layer.build_graph(blended_reps) # (batch_size, context_len, 2*self_attend_hidden_sz)
+            blended_reps = self_attn_layer.build_graph(blended_reps, self.context_mask) # (batch_size, context_len, 2*self_attend_hidden_sz)
 
         # Apply fully connected layer to each blended representation
         # Note, blended_reps_final corresponds to b' in the handout
@@ -236,8 +261,10 @@ class QAModel(object):
         input_feed = {}
         input_feed[self.context_ids] = batch.context_ids
         input_feed[self.context_mask] = batch.context_mask
+        input_feed[self.context_c_ids] = batch.context_char_ids
         input_feed[self.qn_ids] = batch.qn_ids
         input_feed[self.qn_mask] = batch.qn_mask
+        input_feed[self.qn_c_ids] = batch.qn_char_ids
         input_feed[self.ans_span] = batch.ans_span
         input_feed[self.keep_prob] = 1.0 - self.FLAGS.dropout # apply dropout
 
@@ -268,8 +295,10 @@ class QAModel(object):
         input_feed = {}
         input_feed[self.context_ids] = batch.context_ids
         input_feed[self.context_mask] = batch.context_mask
+        input_feed[self.context_c_ids] = batch.context_char_ids
         input_feed[self.qn_ids] = batch.qn_ids
         input_feed[self.qn_mask] = batch.qn_mask
+        input_feed[self.qn_c_ids] = batch.qn_char_ids
         input_feed[self.ans_span] = batch.ans_span
         # note you don't supply keep_prob here, so it will default to 1 i.e. no dropout
 
@@ -294,8 +323,10 @@ class QAModel(object):
         input_feed = {}
         input_feed[self.context_ids] = batch.context_ids
         input_feed[self.context_mask] = batch.context_mask
+        input_feed[self.context_c_ids] = batch.context_char_ids
         input_feed[self.qn_ids] = batch.qn_ids
         input_feed[self.qn_mask] = batch.qn_mask
+        input_feed[self.qn_c_ids] = batch.qn_char_ids
         # note you don't supply keep_prob here, so it will default to 1 i.e. no dropout
 
         output_feed = [self.probdist_start, self.probdist_end]
@@ -323,14 +354,12 @@ class QAModel(object):
         # instead of taking argmax over entire end_dist:
         #    end_pos' = argmax(end_dist[start_pos:start_pos+15])
         # then the real end_pos = end_pos' + start_pos
-        print end_dist.shape
-        trunc_end_dist = np.array([np.array(end_dist[i,start:start+20]) for i,start in enumerate(start_pos)])
-        print trunc_end_dist.shape
-        end_pos_new = start_pos + np.argmax(trunc_end_dist, axis=1)
-        print end_pos_new.shape
-        end_pos = np.argmax(end_dist, axis=1)
-        print end_pos.shape
-
+        trunc_end_dist = np.zeros((start_dist.shape[0], 20))
+        for i,start in enumerate(start_pos):
+            row = end_dist[i, start:start+20]
+            trunc_end_dist[i, :len(row)] = row
+        end_pos = start_pos + np.argmax(trunc_end_dist, axis=1)
+        # end_pos = np.argmax(end_dist, axis=1)
         return start_pos, end_pos
 
 
@@ -354,7 +383,7 @@ class QAModel(object):
         # which are longer than our context_len or question_len.
         # We need to do this because if, for example, the true answer is cut
         # off the context, then the loss function is undefined.
-        for batch in get_batch_generator(self.word2id, dev_context_path, dev_qn_path, dev_ans_path, self.FLAGS.batch_size, context_len=self.FLAGS.context_len, question_len=self.FLAGS.question_len, discard_long=True):
+        for batch in get_batch_generator(self.word2id, dev_context_path, dev_qn_path, dev_ans_path, self.FLAGS.batch_size, context_len=self.FLAGS.context_len, question_len=self.FLAGS.question_len, word_len=self.FLAGS.word_len, discard_long=True):
 
             # Get loss for this batch
             loss = self.get_loss(session, batch)
@@ -409,7 +438,7 @@ class QAModel(object):
 
         # Note here we select discard_long=False because we want to sample from the entire dataset
         # That means we're truncating, rather than discarding, examples with too-long context or questions
-        for batch in get_batch_generator(self.word2id, context_path, qn_path, ans_path, self.FLAGS.batch_size, context_len=self.FLAGS.context_len, question_len=self.FLAGS.question_len, discard_long=False):
+        for batch in get_batch_generator(self.word2id, context_path, qn_path, ans_path, self.FLAGS.batch_size, context_len=self.FLAGS.context_len, question_len=self.FLAGS.question_len, word_len=self.FLAGS.word_len, discard_long=False):
 
             pred_start_pos, pred_end_pos = self.get_start_end_pos(session, batch)
 
@@ -492,7 +521,7 @@ class QAModel(object):
             epoch_tic = time.time()
 
             # Loop over batches
-            for batch in get_batch_generator(self.word2id, train_context_path, train_qn_path, train_ans_path, self.FLAGS.batch_size, context_len=self.FLAGS.context_len, question_len=self.FLAGS.question_len, discard_long=True):
+            for batch in get_batch_generator(self.word2id, train_context_path, train_qn_path, train_ans_path, self.FLAGS.batch_size, context_len=self.FLAGS.context_len, question_len=self.FLAGS.question_len, word_len=self.FLAGS.word_len, discard_long=True):
 
                 # Run training iteration
                 iter_tic = time.time()

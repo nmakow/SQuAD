@@ -330,7 +330,7 @@ class SelfAttn(object):
         self.v_self = tf.get_variable("v_self", shape=(hidden_sz, 1), \
             initializer=tf.contrib.layers.xavier_initializer())
 
-    def build_graph(self, reprs):
+    def build_graph(self, reprs, reprs_mask):
         with vs.variable_scope("SelfAttn"):
             _, num_reprs, repr_sz = reprs.shape
 
@@ -343,16 +343,13 @@ class SelfAttn(object):
             flat_tmp3 = tf.reshape(tmp3, (-1, self.hidden_sz))
             e = tf.reshape(tf.matmul(flat_tmp3, self.v_self), (-1, num_reprs, num_reprs, )) # (batch_sz, num_reprs, num_reprs, )
 
-            mask = tf.ones_like(e)
-            _, attn_dist = masked_softmax(e, mask, 1)
-
+            reprs_attn_mask = tf.expand_dims(reprs_mask, 1)
+            _, attn_dist = masked_softmax(e, reprs_attn_mask, 1)
             self_outputs = tf.matmul(attn_dist, reprs)
 
             # concatenate self_outputs with reprs
             concat_outputs = tf.concat([reprs, self_outputs], 2) # (batch_sz, num_reprs, 2*repr_size)
-            rnn_mask = tf.ones_like(concat_outputs, dtype=tf.int32)
-            rnn_mask = tf.reduce_prod(rnn_mask, axis=2) # (batch_size, num_reprs, )
-            output = self.encoder.build_graph(concat_outputs, rnn_mask)
+            output = self.encoder.build_graph(concat_outputs, reprs_mask)
 
             return output
 
