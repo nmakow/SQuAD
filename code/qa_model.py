@@ -136,7 +136,7 @@ class QAModel(object):
         # Use a RNN to get hidden states for the context and the question
         # Note: here the RNNEncoder is shared (i.e. the weights are the same)
         # between the context and the question.
-        encoder = StackedRNNEncoder(self.FLAGS.hidden_size, 3, self.keep_prob)
+        encoder = StackedRNNEncoder(self.FLAGS.hidden_size, self.FLAGS.num_encoding_layers, self.keep_prob)
         context_hiddens = encoder.build_graph(self.context_embs, self.context_mask) # (batch_size, context_len, hidden_size*2)
         question_hiddens = encoder.build_graph(self.qn_embs, self.qn_mask) # (batch_size, question_len, hidden_size*2)
         print context_hiddens
@@ -166,9 +166,7 @@ class QAModel(object):
         #       from BiDAF paper) to the hidden states from the attention layer.
         if self.FLAGS.modeling_layer:
             modeling_layer = StackedRNNEncoder(self.FLAGS.hidden_size, self.FLAGS.num_model_rnn_layers, self.keep_prob)
-            print blended_reps_final
             blended_reps_final = modeling_layer.build_graph(blended_reps_final, self.context_mask)
-            print blended_reps_final
 
         # Use softmax layer to compute probability distribution for start location
         # Note this produces self.logits_start and self.probdist_start, both of which have shape (batch_size, context_len)
@@ -325,9 +323,13 @@ class QAModel(object):
         # instead of taking argmax over entire end_dist:
         #    end_pos' = argmax(end_dist[start_pos:start_pos+15])
         # then the real end_pos = end_pos' + start_pos
-        # trunc_end_dist = np.array([np.array(end_dist[i,start:start+20]) for i,start in enumerate(start_pos)])
-        # end_pos = start_pos + np.argmax(trunc_end_dist, axis=1)
+        print end_dist.shape
+        trunc_end_dist = np.array([np.array(end_dist[i,start:start+20]) for i,start in enumerate(start_pos)])
+        print trunc_end_dist.shape
+        end_pos_new = start_pos + np.argmax(trunc_end_dist, axis=1)
+        print end_pos_new.shape
         end_pos = np.argmax(end_dist, axis=1)
+        print end_pos.shape
 
         return start_pos, end_pos
 

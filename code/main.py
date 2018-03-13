@@ -51,6 +51,7 @@ tf.app.flags.DEFINE_integer("self_attend_hidden_sz", 75, "Hidden size in self-at
 tf.app.flags.DEFINE_boolean("retrain_word_embeds", False, "If True, retrain word embeddings")
 tf.app.flags.DEFINE_boolean("modeling_layer", False, "If True, use modeling layer as described in BiDAF paper")
 tf.app.flags.DEFINE_integer("num_model_rnn_layers", 2, "Number of hidden RNN layers to use in the modeling layer")
+tf.app.flags.DEFINE_integer("num_encoding_layers", 2, "Number of hidden RNN layers in the context and question encoder")
 
 # Hyperparameters
 tf.app.flags.DEFINE_float("learning_rate", 0.001, "Learning rate.")
