@@ -190,8 +190,10 @@ class QAModel(object):
         # TODO: Modeling layer from BiDAF. We can add another RNN (two stacked
         #       from BiDAF paper) to the hidden states from the attention layer.
         if self.FLAGS.modeling_layer:
-            modeling_layer = StackedRNNEncoder(self.FLAGS.hidden_size, self.FLAGS.num_model_rnn_layers, self.keep_prob)
-            blended_reps_final = modeling_layer.build_graph(blended_reps_final, self.context_mask)
+            model_layer = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob, share=True)
+            blended_reps_final = model_layer.build_graph(blended_reps_final, self.context_mask)
+            # modeling_layer = StackedRNNEncoder(blended_reps_final.shape[-1], self.FLAGS.num_model_rnn_layers, self.keep_prob)
+            # blended_reps_final = modeling_layer.build_graph(blended_reps_final, self.context_mask)
 
         # Use softmax layer to compute probability distribution for start location
         # Note this produces self.logits_start and self.probdist_start, both of which have shape (batch_size, context_len)
