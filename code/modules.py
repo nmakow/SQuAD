@@ -353,6 +353,120 @@ class SelfAttn(object):
 
             return output
 
+class AdditiveAttn(object):
+    """Module for additive attention.
+    [link]
+    TODO: add some comments here.
+    """
+    def __init__(self, keep_prob, value_vec_sz, hidden_sz):
+        """
+        Inputs:
+          keep_prob: tensor containing a single scalar that is the keep probability (for dropout)
+          repr_size: size of the representation vectors (i.e. size of attention vectors)
+          hidden_size: size of the hidden vectors (equal for context and question)
+        """
+        self.keep_prob = keep_prob
+        self.hidden_sz = hidden_sz
+        self.value_vec_sz = value_vec_sz # value vec size
+        self.w1 = tf.get_variable("w1", shape=(value_vec_sz, hidden_sz), \
+            initializer=tf.contrib.layers.xavier_initializer())
+        self.w2 = tf.get_variable("w2", shape=(hidden_sz, hidden_sz), \
+            initializer=tf.contrib.layers.xavier_initializer())
+        self.v = tf.get_variable("v", shape=(hidden_sz, 1), \
+            initializer=tf.contrib.layers.xavier_initializer())
+
+    def build_graph(self, values, values_mask, key):
+        """
+        Keys attend to values.
+        For each key, return an attention distribution and an attention output vector.
+
+        Inputs:
+          values: Tensor shape (batch_size, num_values, value_vec_size).
+          values_mask: Tensor shape (batch_size, num_values).
+            1s where there's real input, 0s where there's padding
+          key: Tensor of shape (1, value_vec_size)
+
+        Outputs:
+          attn_dist: Tensor shape (batch_size, num_keys, num_values).
+            For each key, the distribution should sum to 1,
+            and should be 0 in the value locations that correspond to padding.
+          output: Tensor shape (batch_size, num_keys, hidden_size).
+            This is the attention output; the weighted sum of the values
+            (using the attention distribution as weights).
+        """
+        with vs.variable_scope("AdditiveAttn"):
+            _, num_values, _ = values.shape
+            # _, num_keys, _ = keys.shape
+            # e = v^T (W1 v_i + W2 k)
+            # print values
+            # print values_mask
+            # print key
+            # print
+            flat_values = tf.reshape(values, (-1, self.value_vec_sz)) # shape (batch_sz * num_values, value_vec_size)
+            # print flat_values
+            # flat_keys = tf.reshape(keys, (-1, value_vec_size)) # shape (batch_sz * num_keys, value_vec_size)
+            tmp1 = tf.reshape(tf.matmul(flat_values, self.w1), (-1, num_values, self.hidden_sz)) # (batch_sz, num_values, hidden_sz)
+            # print tmp1
+            tmp2 = tf.matmul(key, self.w2) # (1, hidden_sz)
+            # print tmp2
+            tmp2 = tf.expand_dims(tmp2, 1) # (1, 1, hidden_sz)
+            # print tmp2
+            tmp3 = tf.tanh(tf.add(tmp1, tmp2)) # (batch_sz, num_values, hidden_sz) --- "i" corresponds to rows
+            # print tmp3
+            flat_tmp3 = tf.reshape(tmp3, (-1, self.hidden_sz)) # (batch_sz * num_values, hidden_sz)
+            # print flat_tmp3
+            e = tf.reshape(tf.matmul(flat_tmp3, self.v), (-1, num_values, )) # (batch_sz, num_values, )
+            # print e
+            # print
+
+            # values_attn_mask = tf.expand_dims(values_mask, 1) # (batch_sz, 1, num_values, )
+            _, attn_dist = masked_softmax(e, values_mask, 1) # attn_dist is shape (batch_sz, num_values, )
+            # print attn_dist
+            # print
+
+            # Use attention distribution to take weighted sum of values
+            attn_dist_ = tf.expand_dims(attn_dist, 1) # (batch_sz, 1, num_values,)
+            # print attn_dist_
+            output = tf.matmul(attn_dist_, values) # shape (batch_size, 1, value_vec_size)
+            output = tf.reshape(output, (-1, self.value_vec_sz))
+            # print output
+
+            # Apply dropout
+            output = tf.nn.dropout(output, self.keep_prob)
+            # print output
+            # print
+
+            return e, attn_dist, output
+
+class PointerNetwork(object):
+    """Module for pointer network.
+    [link]
+    TODO: add some comments here.
+    """
+    def __init__(self, keep_prob, value_vec_size, hidden_sz):
+        """
+        Inputs:
+          keep_prob: tensor containing a single scalar that is the keep probability (for dropout)
+          repr_size: size of the representation vectors (i.e. size of attention vectors)
+          hidden_size: size of the hidden vectors (equal for context and question)
+        """
+        self.keep_prob = keep_prob
+        self.hidden_sz = hidden_sz
+        self.value_vec_size = value_vec_size
+        self.attn_layer1 = AdditiveAttn(keep_prob, value_vec_size, hidden_sz)
+        self.attn_layer2 = AdditiveAttn(keep_prob, value_vec_size, hidden_sz)
+        self.hidden_state = tf.get_variable("h", shape=(1, hidden_sz), \
+                initializer=tf.contrib.layers.xavier_initializer())
+
+    def build_graph(self, reprs, reprs_mask):
+        with vs.variable_scope("PointerNetwork"):
+            print "In pointer network build graph!"
+            # start_attn_dist shape (batch_sz, context_len); start_output shape (batch_sz, hidden_sz)
+            start_logits, start_dist, start_output = self.attn_layer1.build_graph(reprs, reprs_mask, self.hidden_state)
+            end_logits, end_dist, end_output = self.attn_layer2.build_graph(reprs, reprs_mask, start_output)
+            return (start_logits, start_dist, start_output, \
+                    end_logits, end_dist, end_output)
+
 def masked_softmax(logits, mask, dim):
     """
     Takes masked softmax over given dimension of logits.

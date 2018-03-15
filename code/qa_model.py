@@ -31,7 +31,7 @@ from evaluate import exact_match_score, f1_score
 from data_batcher import get_batch_generator
 from pretty_print import print_example
 from modules import RNNEncoder, SimpleSoftmaxLayer, BasicAttn, BiDirAttnFlow, \
-                    SelfAttn, StackedRNNEncoder
+                    SelfAttn, StackedRNNEncoder, PointerNetwork
 
 logging.basicConfig(level=logging.INFO)
 
@@ -195,17 +195,23 @@ class QAModel(object):
             # modeling_layer = StackedRNNEncoder(blended_reps_final.shape[-1], self.FLAGS.num_model_rnn_layers, self.keep_prob)
             # blended_reps_final = modeling_layer.build_graph(blended_reps_final, self.context_mask)
 
-        # Use softmax layer to compute probability distribution for start location
-        # Note this produces self.logits_start and self.probdist_start, both of which have shape (batch_size, context_len)
-        with vs.variable_scope("StartDist"):
-            softmax_layer_start = SimpleSoftmaxLayer()
-            self.logits_start, self.probdist_start = softmax_layer_start.build_graph(blended_reps_final, self.context_mask)
+        if True: #TODO: define flag
+            with vs.variable_scope("OutputLayer", reuse=tf.AUTO_REUSE):
+                pointer_network = PointerNetwork(self.keep_prob, blended_reps_final.shape[-1].value, self.FLAGS.hidden_size)
+                (self.logits_start, self.probdist_start, _, self.logits_end, self.probdist_end, _) = \
+                    pointer_network.build_graph(blended_reps_final, self.context_mask)
+        else:
+                # Use softmax layer to compute probability distribution for start location
+                # Note this produces self.logits_start and self.probdist_start, both of which have shape (batch_size, context_len)
+            with vs.variable_scope("StartDist"):
+                softmax_layer_start = SimpleSoftmaxLayer()
+                self.logits_start, self.probdist_start = softmax_layer_start.build_graph(blended_reps_final, self.context_mask)
 
-        # Use softmax layer to compute probability distribution for end location
-        # Note this produces self.logits_end and self.probdist_end, both of which have shape (batch_size, context_len)
-        with vs.variable_scope("EndDist"):
-            softmax_layer_end = SimpleSoftmaxLayer()
-            self.logits_end, self.probdist_end = softmax_layer_end.build_graph(blended_reps_final, self.context_mask)
+                # Use softmax layer to compute probability distribution for end location
+                # Note this produces self.logits_end and self.probdist_end, both of which have shape (batch_size, context_len)
+            with vs.variable_scope("EndDist"):
+                softmax_layer_end = SimpleSoftmaxLayer()
+                self.logits_end, self.probdist_end = softmax_layer_end.build_graph(blended_reps_final, self.context_mask)
 
 
     def add_loss(self):
