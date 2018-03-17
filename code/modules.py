@@ -396,45 +396,24 @@ class AdditiveAttn(object):
         """
         with vs.variable_scope("AdditiveAttn"):
             _, num_values, _ = values.shape
-            # _, num_keys, _ = keys.shape
             # e = v^T (W1 v_i + W2 k)
-            # print values
-            # print values_mask
-            # print key
-            # print
             flat_values = tf.reshape(values, (-1, self.value_vec_sz)) # shape (batch_sz * num_values, value_vec_size)
-            # print flat_values
-            # flat_keys = tf.reshape(keys, (-1, value_vec_size)) # shape (batch_sz * num_keys, value_vec_size)
             tmp1 = tf.reshape(tf.matmul(flat_values, self.w1), (-1, num_values, self.hidden_sz)) # (batch_sz, num_values, hidden_sz)
-            # print tmp1
             tmp2 = tf.matmul(key, self.w2) # (1, hidden_sz)
-            # print tmp2
             tmp2 = tf.expand_dims(tmp2, 1) # (1, 1, hidden_sz)
-            # print tmp2
             tmp3 = tf.tanh(tf.add(tmp1, tmp2)) # (batch_sz, num_values, hidden_sz) --- "i" corresponds to rows
-            # print tmp3
             flat_tmp3 = tf.reshape(tmp3, (-1, self.hidden_sz)) # (batch_sz * num_values, hidden_sz)
-            # print flat_tmp3
             e = tf.reshape(tf.matmul(flat_tmp3, self.v), (-1, num_values, )) # (batch_sz, num_values, )
-            # print e
-            # print
 
-            # values_attn_mask = tf.expand_dims(values_mask, 1) # (batch_sz, 1, num_values, )
             _, attn_dist = masked_softmax(e, values_mask, 1) # attn_dist is shape (batch_sz, num_values, )
-            # print attn_dist
-            # print
 
             # Use attention distribution to take weighted sum of values
             attn_dist_ = tf.expand_dims(attn_dist, 1) # (batch_sz, 1, num_values,)
-            # print attn_dist_
             output = tf.matmul(attn_dist_, values) # shape (batch_size, 1, value_vec_size)
             output = tf.reshape(output, (-1, self.value_vec_sz))
-            # print output
 
             # Apply dropout
             output = tf.nn.dropout(output, self.keep_prob)
-            # print output
-            # print
 
             return e, attn_dist, output
 

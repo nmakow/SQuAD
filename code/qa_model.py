@@ -163,7 +163,10 @@ class QAModel(object):
         # Use a RNN to get hidden states for the context and the question
         # Note: here the RNNEncoder is shared (i.e. the weights are the same)
         # between the context and the question.
-        encoder = StackedRNNEncoder(self.FLAGS.hidden_size, self.FLAGS.num_encoding_layers, self.keep_prob)
+        if self.FLAGS.use_stacked_encoder:
+            encoder = StackedRNNEncoder(self.FLAGS.hidden_size, self.FLAGS.num_encoding_layers, self.keep_prob)
+        else:
+            encoder = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
         context_hiddens = encoder.build_graph(self.context_embs, self.context_mask) # (batch_size, context_len, hidden_size*2)
         question_hiddens = encoder.build_graph(self.qn_embs, self.qn_mask) # (batch_size, question_len, hidden_size*2)
 
@@ -195,7 +198,7 @@ class QAModel(object):
             # modeling_layer = StackedRNNEncoder(blended_reps_final.shape[-1], self.FLAGS.num_model_rnn_layers, self.keep_prob)
             # blended_reps_final = modeling_layer.build_graph(blended_reps_final, self.context_mask)
 
-        if True: #TODO: define flag
+        if self.FLAGS.pointer_network: #TODO: define flag
             with vs.variable_scope("OutputLayer", reuse=tf.AUTO_REUSE):
                 pointer_network = PointerNetwork(self.keep_prob, blended_reps_final.shape[-1].value, self.FLAGS.hidden_size)
                 (self.logits_start, self.probdist_start, _, self.logits_end, self.probdist_end, _) = \

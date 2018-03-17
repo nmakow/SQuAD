@@ -141,7 +141,7 @@ def refill_batches(batches, word2id, context_file, qn_file, ans_file, batch_size
         context_tokens, context_ids = sentence_to_token_ids(context_line, word2id)
         context_char_ids = sentence_to_char_ids(context_line)
         qn_tokens, qn_ids = sentence_to_token_ids(qn_line, word2id)
-        qn_char_ids = sentence_to_char_ids(context_line)
+        qn_char_ids = sentence_to_char_ids(qn_line)
         ans_span = intstr_to_intlist(ans_line)
 
         # read the next line from each file
