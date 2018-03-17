@@ -256,18 +256,12 @@ class BiDirAttnFlow(object):
             flat_questions = tf.reshape(question_hiddens, (-1, hidden_sz))
             context_contribs = tf.reshape(tf.matmul(flat_contexts, self.w_sim1), (-1, context_len,)) # (batch_sz, context_len, 1)
             question_contribs = tf.reshape(tf.matmul(flat_questions, self.w_sim2), (-1, question_len,)) # (batch_sz, question_len,)
-
             context_hiddens_ = tf.expand_dims(context_hiddens, 1) # (batch_sz, 1, context_len, 2h)
             question_hiddens_ = tf.expand_dims(question_hiddens, 2) # (batch_sz, question_len, 1, 2h)
-            # context_question_hiddens = tf.reshape(tf.multiply(context_hiddens_, question_hiddens_), (-1, hidden_sz)) # (batch_sz, question_len, context_len, 2h)
-             #context_question_contribs = tf.reshape(tf.matmul(context_question_hiddens, self.w_sim3), (-1, question_len, context_len,)) # (batch_sz, question_len, context_len, )
 
             # w_sim3 is shape (2h, 1). context_hiddens_ is (batch_sz, 1, context_len, 2h)
             tmp1 = tf.multiply(tf.reshape(self.w_sim3, (1, 1, hidden_sz)), context_hiddens) # (batch_sz, context_len, hidden_sz)
             tmp2 = tf.matmul(tmp1, tf.transpose(question_hiddens, perm=[0,2,1]))
-
-            # print context_question_contribs
-            # print tmp2
 
             context_contribs_ = tf.expand_dims(context_contribs, 2) # (batch_sz, context_len, 1)
             question_contribs_ = tf.expand_dims(question_contribs, 1) # (batch_sz, 1, question_len)
@@ -278,14 +272,11 @@ class BiDirAttnFlow(object):
                 tmp2 \
             ) # (batch_sz, context_len, question_len)
 
-            # print similarities
-
             # 2. C2Q attention.
             # Row-wise softmax of sim matrix
-            # similarities_t = tf.transpose(similarities, perm=[0, 2, 1]) # shape (batch_size, context_len, question_len)
             qn_mask_ = tf.expand_dims(qn_mask, 1) # (batch_sz, 1, question_len)
             cn_mask_ = tf.expand_dims(context_mask, 2) # (batch_sz, context_len, 1)
-            c2q_mask = tf.multiply(qn_mask_, cn_mask_)
+            c2q_mask = tf.multiply(cn_mask_, qn_mask_)
             _, c2q_attn_dist = masked_softmax(similarities, c2q_mask, 1) # shape (batch_size, context_len, question_len). take softmax over values
             # Weighted sum of question hidden states
             c2q_output = tf.matmul(c2q_attn_dist, question_hiddens)
@@ -304,7 +295,7 @@ class BiDirAttnFlow(object):
             output = tf.concat([context_hiddens, c2q_output, block3, block4], 2)
 
             # 5. Apply dropout
-            # output = tf.nn.dropout(output, self.keep_prob)
+            output = tf.nn.dropout(output, self.keep_prob)
 
             return output
 
