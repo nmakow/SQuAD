@@ -163,12 +163,18 @@ class QAModel(object):
         # Use a RNN to get hidden states for the context and the question
         # Note: here the RNNEncoder is shared (i.e. the weights are the same)
         # between the context and the question.
-        if self.FLAGS.use_stacked_encoder:
-            encoder = StackedRNNEncoder(self.FLAGS.hidden_size, self.FLAGS.num_encoding_layers, self.keep_prob)
-        else:
-            encoder = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
-        context_hiddens = encoder.build_graph(self.context_embs, self.context_mask) # (batch_size, context_len, hidden_size*2)
-        question_hiddens = encoder.build_graph(self.qn_embs, self.qn_mask) # (batch_size, question_len, hidden_size*2)
+	with vs.variable_scope("encoder_layer1", reuse=tf.AUTO_REUSE):
+            if self.FLAGS.use_stacked_encoder:
+                encoder = StackedRNNEncoder(self.FLAGS.hidden_size, self.FLAGS.num_encoding_layers, self.keep_prob)
+            else:
+                encoder = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
+            context_hiddens = encoder.build_graph(self.context_embs, self.context_mask) # (batch_size, context_len, hidden_size*2)
+            question_hiddens = encoder.build_graph(self.qn_embs, self.qn_mask) # (batch_size, question_len, hidden_size*2)
+	if self.FLAGS.num_encoding_layers > 1:
+	    with vs.variable_scope("encoder_layer2", reuse=tf.AUTO_REUSE):
+		encoder2 = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
+	        context_hiddens = encoder2.build_graph(context_hiddens, self.context_mask)
+	        question_hiddens = encoder2.build_graph(question_hiddens, self.qn_mask)
 
         # Use context hidden states to attend to question hidden states
         if self.FLAGS.bidaf:
@@ -196,6 +202,10 @@ class QAModel(object):
             with vs.variable_scope("Model_Layer", reuse=tf.AUTO_REUSE):
                 model_layer = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
                 blended_reps_final = model_layer.build_graph(blended_reps_final, self.context_mask)
+	if self.FLAGS.modeling_layer and self.FLAGS.num_model_rnn_layers > 1:
+	    with vs.variable_scope("Model_layer2", reuse=tf.AUTO_REUSE):
+		model_layer2 = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
+                blended_reps_final = model_layer2.build_graph(blended_reps_final, self.context_mask)
             # modeling_layer = StackedRNNEncoder(blended_reps_final.shape[-1], self.FLAGS.num_model_rnn_layers, self.keep_prob)
             # blended_reps_final = modeling_layer.build_graph(blended_reps_final, self.context_mask)
 
